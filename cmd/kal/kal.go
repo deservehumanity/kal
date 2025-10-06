@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -17,6 +18,14 @@ type Session struct {
 type Activity struct {
 	Name 		string 		`json:"name"`
 	Sessions 	[]Session 	`json:"sessions"`
+}
+
+type ActivityStats struct {
+	Name					string		`json:"name"`
+	TotalHoursSpent			float32		`json:"totalHoursSpent"`
+	TotalSpentFormatted		string		`json:"totalSpentFormatted"`
+	IsActive				bool		`json:"isActive"`
+	ActiveSince				string		`json:"activeSince"`
 }
 
 type RunFlags struct {
@@ -229,18 +238,14 @@ func (a *Application) Setup() {
 		Use: "stat",
 		Short: "Get stats for a given activity",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if (!a.runFlags.ShouldOutputJson) {
-				if len(args) == 0 {
-					return errors.New("missing activity name")
-				}
+			activities, err := a.storage.Load()
+			if err != nil {
+				return err
+			}
 
+			if len(args) > 0 {
 				activityName := args[0]
 				
-				activities, err := a.storage.Load()
-				if err != nil {
-					return err
-				}
-
 				var activity *Activity
 
 				for _, a := range activities {
@@ -254,27 +259,53 @@ func (a *Application) Setup() {
 					return errors.New(fmt.Sprintf("unknown activity name \"%s\"", activityName))
 				}
 		
-				var totalDuration time.Duration
-				var hasActiveSession bool
-				var activeSince time.Time
-				for _, session := range activity.Sessions {
-					if session.EndedAt.IsZero() {
-						hasActiveSession = true
-						activeSince = session.StartedAt
-						totalDuration += time.Since(session.StartedAt)
-					} else {
-						totalDuration += session.EndedAt.Sub(session.StartedAt)
+				stats := a.getActivityStats(activity)
+				
+				if a.runFlags.ShouldOutputJson {
+					v, err := json.MarshalIndent(stats, "", "\t")
+					if err != nil {
+						return err
+					}
+
+					fmt.Println(string(v))
+				} else {
+					fmt.Printf("Activity: %s\n", stats.Name)
+					fmt.Printf("Total time spent (formatted): %s\n", stats.TotalSpentFormatted)
+					fmt.Printf("Total time spent (hours): %f\n", stats.TotalHoursSpent)
+					if stats.IsActive {
+						fmt.Printf("Active session since: %s\n", stats.ActiveSince)
 					}
 				}
-
-				fmt.Printf("Activity: %s\n", activity.Name)
-				fmt.Printf("Total time tracked: %s\n", formatDuration(totalDuration))
-				if hasActiveSession {
-					fmt.Printf("Currently active (since %s)\n", activeSince.Format(time.RFC822))
-				}
 			} else {
-				return errors.ErrUnsupported
+				var activitieStatsArray []ActivityStats
+				
+				for _, activity := range activities {
+					activitieStatsArray = append(activitieStatsArray, a.getActivityStats(&activity))
+				}
+				
+				if a.runFlags.ShouldOutputJson {
+					v, err := json.MarshalIndent(activitieStatsArray, "", "\t")
+					if err != nil {
+						return err
+					}
+
+					fmt.Println(string(v))
+				} else {
+					for i, stats := range activitieStatsArray {
+						fmt.Printf("Activity: %s\n", stats.Name)
+						fmt.Printf("Total time spent (formatted): %s\n", stats.TotalSpentFormatted)
+						fmt.Printf("Total time spent (hours): %f\n", stats.TotalHoursSpent)
+						if stats.IsActive {
+							fmt.Printf("Active session since: %s\n", stats.ActiveSince)
+						}
+
+						if i < len(activitieStatsArray) {
+							fmt.Println()
+						}
+					}
+				}
 			}
+
 			return nil
 		},
 	}
@@ -288,9 +319,23 @@ func (a *Application) Setup() {
 			if err != nil {
 				return err
 			}
-
-			for	_, activity := range activities {
-				fmt.Println(activity.Name)
+			
+			if a.runFlags.ShouldOutputJson {
+				var activityNames []string
+				for _, activity := range activities {
+					activityNames = append(activityNames, activity.Name)
+				}
+				
+				jsonBlob, err := json.MarshalIndent(activityNames, "", "\t") 
+				if err != nil {
+					return err
+				}
+				
+				fmt.Println(string(jsonBlob))
+			} else {
+				for	_, activity := range activities {
+					fmt.Println(activity.Name)
+				}
 			}
 
 			return nil
@@ -315,10 +360,14 @@ func (a *Application) Setup() {
 			}
 			
 			if a.runFlags.ShouldOutputJson {
-				return errors.ErrUnsupported
+				activitiesJSON, err := json.MarshalIndent(unfinishedActivities, "", "\t")
+				if err != nil {
+					return err
+				}
+
+				fmt.Println(string(activitiesJSON))
 			} else {
 				for _, activity := range unfinishedActivities {
-
 					fmt.Printf("Activity: %s\n", activity.Name)
 					if len(activity.Sessions) > 0 {
 						lastSession := activity.Sessions[len(activity.Sessions)-1]
@@ -345,6 +394,13 @@ func (a *Application) Setup() {
 		"output as json to stdout",
 	)
 
+	listActivitiesCmd.Flags().BoolVar(
+		&a.runFlags.ShouldOutputJson,
+		"json",
+		false,
+		"output as json to stdout",
+	)
+
 	a.rootCmd.AddGroup(&cobra.Group {
 		Title: "essential",
 		ID: "essential",
@@ -363,12 +419,43 @@ func (a *Application) Execute() error {
 	return a.rootCmd.Execute()
 }
 
+func (a *Application) getActivityStats(activity *Activity) ActivityStats {
+	var totalDuration time.Duration
+	var hasActiveSession bool
+	var activeSince time.Time
+	for _, session := range activity.Sessions {
+		if session.EndedAt.IsZero() {
+			hasActiveSession = true
+			activeSince = session.StartedAt
+			totalDuration += time.Since(session.StartedAt)
+		} else {
+			totalDuration += session.EndedAt.Sub(session.StartedAt)
+		}
+	}
+
+	return ActivityStats {
+		Name: activity.Name,
+		TotalHoursSpent: float32(totalDuration.Hours()),
+		TotalSpentFormatted: formatDuration(totalDuration),
+		IsActive: hasActiveSession,
+		ActiveSince: activeSince.Format(time.RFC822),
+	}
+}
+
 func formatDuration(d time.Duration) string {
 	h := int (d.Hours())
 	m := int (d.Minutes()) % 60
 	s := int (d.Seconds()) % 60
 
 	return fmt.Sprintf("%02dh %02dm %02ds", h, m ,s)
+}
+
+func formatDurationHMS(d time.Duration) (int, int, int) {
+	h := int (d.Hours())
+	m := int (d.Minutes()) % 60
+	s := int (d.Seconds()) % 60
+
+	return h, m, s
 }
 
 func main() {
