@@ -237,12 +237,14 @@ func (a *Application) Setup() {
 	activityStatsCmd := &cobra.Command {
 		Use: "stat",
 		Short: "Get stats for a given activity",
+		GroupID: "essential",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			activities, err := a.storage.Load()
 			if err != nil {
 				return err
 			}
-
+			
+			// May the universe forgive me
 			if len(args) > 0 {
 				activityName := args[0]
 				
@@ -299,7 +301,7 @@ func (a *Application) Setup() {
 							fmt.Printf("Active session since: %s\n", stats.ActiveSince)
 						}
 
-						if i < len(activitieStatsArray) {
+						if i < len(activitieStatsArray) - 1 {
 							fmt.Println()
 						}
 					}
@@ -314,6 +316,7 @@ func (a *Application) Setup() {
 		Use: "list",
 		Aliases: []string{"ls"},
 		Short: "list all activity names",
+		GroupID: "essential",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			activities, err := a.storage.Load()
 			if err != nil {
@@ -345,6 +348,7 @@ func (a *Application) Setup() {
 	logActivitiesCmd := &cobra.Command {
 		Use: "log",
 		Short: "see all active activities",
+		GroupID: "essential",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			activities, err := a.storage.Load()
 			if err != nil {
@@ -369,11 +373,51 @@ func (a *Application) Setup() {
 			} else {
 				for _, activity := range unfinishedActivities {
 					fmt.Printf("Activity: %s\n", activity.Name)
-					if len(activity.Sessions) > 0 {
-						lastSession := activity.Sessions[len(activity.Sessions)-1]
-						fmt.Printf("StartedAt: %s\n", lastSession.StartedAt.Format(time.RFC822))
-					}
+					lastSession := activity.Sessions[len(activity.Sessions)-1]
+					fmt.Printf("StartedAt: %s\n", lastSession.StartedAt.Format(time.RFC822))
 				}
+			}
+
+			return nil
+		},
+	}
+	
+	renameActivityCmd := &cobra.Command {
+		Use: "rename",
+		Aliases: []string{"mv"},
+		Short: "renames given activity",
+		GroupID: "essential",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) < 2 {
+				return errors.New("expected 2 arguments. old name and new name")
+			}
+
+			oldName := args[0]
+			newName := args[1]
+
+			activities, err := a.storage.Load()
+			if err != nil {
+				return err
+			}
+			
+			isFound := false
+
+			for i := range activities {
+				a := &activities[i]
+
+				if (a.Name == oldName) {
+					a.Name = newName
+					isFound = true
+					break
+				}
+			}
+			
+			if !isFound {
+				return errors.New(fmt.Sprintf("no activity with name \"%s\" found", oldName))
+			}
+
+			if err := a.storage.Save(activities); err != nil {
+				return err
 			}
 
 			return nil
@@ -413,6 +457,7 @@ func (a *Application) Setup() {
 	a.rootCmd.AddCommand(activityStatsCmd)
 	a.rootCmd.AddCommand(listActivitiesCmd)
 	a.rootCmd.AddCommand(logActivitiesCmd)
+	a.rootCmd.AddCommand(renameActivityCmd)
 }
 
 func (a *Application) Execute() error {
@@ -459,14 +504,10 @@ func formatDurationHMS(d time.Duration) (int, int, int) {
 }
 
 func main() {
-	// TODO: Encapsulate repeating logic
-	// TODO: Add all stats showcase when calling stat with no activity name
 	// TODO: Use SQLite for rich queries (make a storer interface?)
-	// TODO: Add kal log which shows all recent sessions
 	// TODO: Automate testing
-	// TODO: Add --json flag to format output as json
 	// TODO: Maybe test with swaybar in hyprland via hooks
-	// TODO: Make idiomatic golang project structure
+	// TODO: Add custom hooks for users to define
 	
 	hd, err := os.UserHomeDir()
 	if err != nil {
