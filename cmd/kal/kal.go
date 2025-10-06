@@ -364,7 +364,16 @@ func (a *Application) Setup() {
 			}
 			
 			if a.runFlags.ShouldOutputJson {
-				activitiesJSON, err := json.MarshalIndent(unfinishedActivities, "", "\t")
+				var ua []map[string]string
+				
+				for _, a := range unfinishedActivities {
+					ua = append(ua, map[string]string {
+						"name": a.Name,
+						"startedAt": a.Sessions[len(a.Sessions)-1].StartedAt.Format(time.RFC822),
+					})
+				}
+
+				activitiesJSON, err := json.MarshalIndent(ua, "", "\t")
 				if err != nil {
 					return err
 				}
