@@ -5,10 +5,27 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/spf13/cobra"
 )
+
+type HookName string
+var Hooks = struct {
+	OnNewActivity		HookName
+	OnActivityStart		HookName
+	OnActivityStop		HookName
+	OnLog				HookName
+	OnActivityRename	HookName
+} {
+	OnNewActivity:		"on_new_activity",
+	OnActivityStart:	"on_activity_start",
+	OnActivityStop:		"on_activity_stop",
+	OnLog:				"on_log",
+	OnActivityRename:	"on_activity_rename",
+}
 
 type Session struct {
 	StartedAt 	time.Time 	`json:"startedAt"`
@@ -78,14 +95,18 @@ func (a *Application) Setup() {
 					return errors.New(fmt.Sprintf("activity \"%s\" already exists", newActivityName))
 				}
 			}
-		
+			
 			activity := Activity {
 				Name: newActivityName,
 				Sessions: []Session{},
 			}
-		
+			
+			if err := a.runHook(Hooks.OnNewActivity, activity.Name); err != nil {
+				fmt.Printf("hook error: %v\n", err)
+			}
+
 			activities = append(activities, activity)
-		
+
 			if err := a.storage.Save(activities); err != nil {
 				return err
 			}
@@ -123,7 +144,11 @@ func (a *Application) Setup() {
 			if activity == nil {
 				return errors.New(fmt.Sprintf("unknown activity name \"%s\"", activityName))
 			}
-		
+			
+			if err := a.runHook(Hooks.OnActivityStart, activityName); err != nil {
+				fmt.Printf("hook error: %v\n", err)
+			}
+
 			if (len(activity.Sessions) > 0 && 
 				activity.Sessions[len(activity.Sessions)-1].EndedAt.IsZero()) {
 				return errors.New(
@@ -185,6 +210,11 @@ func (a *Application) Setup() {
 					),
 				)
 			}
+			
+			if err := a.runHook(Hooks.OnActivityStop, activityName); err != nil {
+				fmt.Printf("hook error: %v\n", err)
+			}
+
 
 			activities[activityIndex].Sessions[len(activities[activityIndex].Sessions)-1].EndedAt = time.Now()
 		
@@ -357,7 +387,7 @@ func (a *Application) Setup() {
 			if err != nil {
 				return err
 			}
-			
+
 			var unfinishedActivities []Activity
 
 			for _, activity := range activities {
@@ -365,7 +395,12 @@ func (a *Application) Setup() {
 					unfinishedActivities = append(unfinishedActivities, activity)
 				}
 			}
-			
+
+			// TODO: What to pass here?
+			if err := a.runHook(Hooks.OnLog); err != nil {
+				fmt.Printf("hook error: %v\n", err)
+			}
+
 			if a.runFlags.ShouldOutputJson {
 				var ua []map[string]string
 				
@@ -436,6 +471,10 @@ func (a *Application) Setup() {
 			
 			if !isFound {
 				return errors.New(fmt.Sprintf("no activity with name \"%s\" found", oldName))
+			}
+			
+			if err := a.runHook(Hooks.OnActivityRename, oldName, newName); err != nil {
+				fmt.Printf("hook error: %v\n", err)
 			}
 
 			if err := a.storage.Save(activities); err != nil {
@@ -516,6 +555,20 @@ func (a *Application) getActivityStats(activity *Activity) ActivityStats {
 	}
 }
 
+func (a Application) runHook(hookName HookName, args ...string) error {
+	hookPath := filepath.Join(a.configDir, "hooks", string(hookName) + ".sh")
+
+	if _, err := os.Stat(hookPath); os.IsNotExist(err) {
+		return nil
+	}
+	
+	cmd := exec.Command("bash", append([]string{hookPath}, args...)...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
 func formatDuration(d time.Duration) string {
 	h := int (d.Hours())
 	m := int (d.Minutes()) % 60
@@ -553,6 +606,10 @@ func main() {
 		} else {
 			return 	
 		}
+	}
+	
+	if err := os.MkdirAll(filepath.Join(configDir, "hooks"), os.ModePerm); err != nil {
+		return
 	}
 
 	storage, err := NewJSONStorage(configDir)
