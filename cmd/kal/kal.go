@@ -13,6 +13,7 @@ import (
 type Session struct {
 	StartedAt 	time.Time 	`json:"startedAt"`
 	EndedAt 	time.Time 	`json:"endedAt"`
+	Note		string		`json:"note,omitempty"`
 }
 
 type Activity struct {
@@ -30,6 +31,7 @@ type ActivityStats struct {
 
 type RunFlags struct {
 	ShouldOutputJson bool
+	Note			 string
 }
 
 type Application struct {
@@ -134,6 +136,7 @@ func (a *Application) Setup() {
 
 			activity.Sessions = append(activity.Sessions, Session {
 				StartedAt: time.Now(),
+				Note: a.runFlags.Note,
 			})
 			
 			if err := a.storage.Save(activities); err != nil {
@@ -366,11 +369,18 @@ func (a *Application) Setup() {
 			if a.runFlags.ShouldOutputJson {
 				var ua []map[string]string
 				
-				for _, a := range unfinishedActivities {
-					ua = append(ua, map[string]string {
-						"name": a.Name,
-						"startedAt": a.Sessions[len(a.Sessions)-1].StartedAt.Format(time.RFC822),
-					})
+				for _, act := range unfinishedActivities {
+					lastSession := act.Sessions[len(act.Sessions)-1]
+					m :=  map[string]string {
+						"name": act.Name,
+						"startedAt": lastSession.StartedAt.Format(time.RFC822),
+					}
+					
+					if len(lastSession.Note) > 0 {
+						m["note"] = lastSession.Note
+					}
+
+					ua = append(ua, m)
 				}
 
 				activitiesJSON, err := json.MarshalIndent(ua, "", "\t")
@@ -384,6 +394,9 @@ func (a *Application) Setup() {
 					fmt.Printf("Activity: %s\n", activity.Name)
 					lastSession := activity.Sessions[len(activity.Sessions)-1]
 					fmt.Printf("StartedAt: %s\n", lastSession.StartedAt.Format(time.RFC822))
+					if len(lastSession.Note) > 0 {
+						fmt.Printf("Note: %s\n", lastSession.Note)
+					}
 				}
 			}
 
@@ -432,6 +445,13 @@ func (a *Application) Setup() {
 			return nil
 		},
 	}
+	
+	startActivityCmd.Flags().StringVar(
+		&a.runFlags.Note,
+		"note",
+		"",
+		"add a note to session",
+	)
 
 	activityStatsCmd.Flags().BoolVar(
 		&a.runFlags.ShouldOutputJson,
