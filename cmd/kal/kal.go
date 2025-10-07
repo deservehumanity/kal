@@ -58,7 +58,7 @@ type Application struct {
 	configDir string
 }
 
-func NewApp(storage Storer, configDir string) (*Application, error) {
+func NewApp(storage Storer, configDir string) *Application {
 	return &Application {
 		storage: storage,
 		runFlags: RunFlags {
@@ -69,7 +69,7 @@ func NewApp(storage Storer, configDir string) (*Application, error) {
 			Use: "kal",
 			Short: "Track time spent on real-life activities. Run [kal start {activity-name}] to start tracking and [kal stop {activity-name}] to stop it.",
 		},
-	}, nil
+	}
 }
 
 func (a *Application) Setup() {
@@ -586,11 +586,12 @@ func formatDurationHMS(d time.Duration) (int, int, int) {
 }
 
 func main() {
-	// TODO: Use SQLite for rich queries (make a storer interface?)
-	// TODO: Automate testing
-	// TODO: Maybe test with swaybar in hyprland via hooks
-	// TODO: Add custom hooks for users to define
-	
+	// TODO: Run hooks asynchronously
+	// TODO: Pass jsonData into Stdin
+	// TODO: Allow different languages for hooks (.py, .sh, .pl, .js)
+	// TODO: Log hook results into hooks/hooks.log
+	// TODO: Call hooks with context?
+
 	hd, err := os.UserHomeDir()
 	if err != nil {
 		return
@@ -618,11 +619,7 @@ func main() {
 		return
 	}
 	
-	app, err := NewApp(storage, configDir)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
+	app := NewApp(storage, configDir)
 
 	app.Setup()
 	app.Execute()
